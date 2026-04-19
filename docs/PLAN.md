@@ -1,10 +1,23 @@
-# Hebrew-first LMS — Webflow storefront + Grow checkout + LH headless
+# Maya's course launch — Webflow storefront + Grow checkout + LH (English UI) headless
+
+## Revision 2026-04-19 (pm) — fresh fork, English-only LH
+
+This branch (`feat/launch-v2`) is a clean fork from `upstream/learnhouse/main`. The previous branch (`feat/storefront-bridge-launch`) tried to make LH Hebrew-first learner-facing. After repeated admin-RTL bleed-through bugs, we concluded:
+
+- **Customer-facing marketing is Webflow, not LH.** Visitors never land on LH until after purchase.
+- **Post-purchase learners see LH only via a magic-link email.** They navigate their course, which contains Hebrew *content* authored by Maya (videos, lesson text). Browsers render Hebrew content correctly inside an English UI chrome without any `<html dir>` gymnastics (Unicode bidi handles it).
+- **LH UI chrome can stay English.** The savings: no codemod, no `he.json`, no dynamic lang/dir, no RTL polish to fight with portals and inheritance.
+
+So Phase 1 + Phase 2 of the old plan are **deleted**. What survives from that work was cherry-picked onto this branch: deploy config, OSS-mode env/bootstrap, admin-bypass, single-tenant `/login` fix, watermark removal, the planning docs, and the bridge scaffold. Phase 3 onward (Webflow + Grow + bridge) is unchanged.
 
 ## Context
 
-We forked `learnhouse/learnhouse` (Next.js 16 + FastAPI LMS) at `/home/user/coins`. The near-term goal is to launch a paid course for the user's sister; the longer-term goal is (aspirationally) to help other Israeli creators on the same platform.
+We forked `learnhouse/learnhouse` (Next.js 16 + FastAPI LMS). The near-term goal is to launch a paid course for the user's sister (Maya); the longer-term goal is (aspirationally) to help other Israeli creators on the same platform.
 
-The architecture was revised twice. First revision: move commerce out of LH to a managed Israeli stack (Grow by Meshulam) to avoid owning VAT / חשבונית מס/קבלה / תשלומים / Bit / Israeli-bank payouts. Second revision (grill-me session 2026-04-19): move the marketing storefront from Wix to **Webflow** after confirming (a) Webflow's design ceiling and CMS match the editorial bar Maya wants, (b) Maya will accept the English admin in exchange, (c) Webflow has a first-party Claude MCP (released Feb 2026) so Claude can drive the build without a freelancer.
+Architecture choices:
+- **Commerce outside LH** in a managed Israeli stack (Grow by Meshulam) — avoids owning VAT / חשבונית מס/קבלה / תשלומים / Bit / Israeli-bank payouts.
+- **Marketing on Webflow** (not Wix) — editorial design ceiling, native CMS for the Hebrew blog, first-party Claude MCP (released Feb 2026) means Claude drives the build without a freelancer.
+- **LH as English-UI headless learner app** — course content is Hebrew (Maya authors videos/lessons), but the surrounding UI stays English. Learners land here only via magic-link post-purchase.
 
 **Final architecture:**
 
@@ -32,8 +45,8 @@ The architecture was revised twice. First revision: move commerce out of LH to a
 - **Bridge** — ~300 lines of TS. The only "custom" code in the commerce path.
 
 **Scope decisions (grill-me canonical, 2026-04-19):**
-- **Customer-facing**: He + En both first-class on Webflow and LH.
-- **Admin-facing**: English-only across the stack. Maya accepts this in exchange for Webflow design ceiling.
+- **Customer-facing marketing**: Hebrew-first on Webflow (with English secondary); LH is English-UI only (Hebrew comes through as lesson content, not chrome).
+- **Admin-facing**: English-only across the stack. Maya accepts this.
 - **Payments**: one-time only. תשלומים (installments) offered at Grow checkout; bridge doesn't manage installments.
 - **Course access window**: **12 months** from purchase. Bridge sets expiry at enrollment time.
 - **Displayed prices**: pre-VAT now (Maya is עוסק פטור); migrate to VAT-inclusive when she crosses to מורשה (~₪107K/yr threshold — verify current). A VAT-migration runbook handles the switch.
@@ -46,53 +59,13 @@ The architecture was revised twice. First revision: move commerce out of LH to a
 - **Fork freedom**: we're free to diverge from upstream LH. Upstream-mergeability is nice-to-have, not a constraint.
 - **Phase 6 multi-seller vision**: aspirational; no v1 architectural concessions.
 
-Work happens on branch `claude/rtl-stripe-integration-uGQRo` (branch name kept for continuity).
+Work happens on branch `feat/launch-v2` (fresh fork from upstream, cherry-picked surviving commits from the previous `feat/storefront-bridge-launch` branch).
 
-## Phase 1 — LH RTL + Hebrew foundations
+## Phase 1 + 2 — removed
 
-Goal: learner experience renders natively in Hebrew with no visual regressions in English.
+Previous Phase 1 (RTL + Hebrew foundations codemod + dynamic `<html lang/dir>` + `he.json`) and Phase 2 (learner translations) are **deleted from scope**. LH's UI chrome stays English. Maya's course content is Hebrew and renders correctly inside English UI via Unicode bidi without any dir/lang changes.
 
-1. **Tailwind upgrade to 4.2** — `apps/web/package.json` (current: 4.1.16). Confirms full logical-property utilities (`ms-*`, `me-*`, `ps-*`, `pe-*`, `start-*`, `end-*`, `text-start`, `text-end`, `border-s`, `border-e`, `rounded-s-*`, `rounded-e-*`, `float-start`, `float-end`, `inset-inline-*`).
-2. **Dynamic `<html lang dir>`** — `apps/web/app/layout.tsx:26`. Replace hardcoded `lang="en"` with a server-computed language from cookie/Accept-Language, default `he`, and set `dir` from a direction map (`he`, `ar`, `fa`, `ur` → `rtl`; rest → `ltr`). Keep the existing `I18nProvider` in sync — expose a small `setLangCookie` + `router.refresh()` flow so client language changes re-render the `<html>` shell.
-3. **Locale detection + cookie** — new `apps/web/services/i18n/serverLocale.ts` with `getServerLocale()` reading `NEXT_LOCALE` cookie, falling back to `Accept-Language`, defaulting to `he`. Use it from `layout.tsx` and server components that format.
-4. **Hebrew locale file** — add `apps/web/locales/he.json` mirroring `en.json`. Leave strings as English initially; translate incrementally in Phase 2. The existing `i18next` setup already lazy-loads locale bundles.
-5. **Hebrew-capable default font** — `apps/web/app/layout.tsx` swaps `Wix Madefor Text` for **Rubik** (already in `apps/web/lib/fonts.ts`). Keep a Latin fallback.
-6. **Codemod: LTR → logical utilities** — one-pass script at `apps/web/scripts/codemod-rtl.mjs`. Replace inside `className="…"` and `cn(...)` call-sites only:
-   - `ml-` → `ms-`, `mr-` → `me-`
-   - `pl-` → `ps-`, `pr-` → `pe-`
-   - `left-` → `start-`, `right-` → `end-`
-   - `text-left` → `text-start`, `text-right` → `text-end`
-   - `border-l` → `border-s`, `border-r` → `border-e`
-   - `rounded-l-*` → `rounded-s-*`, `rounded-r-*` → `rounded-e-*`
-   - `float-left` → `float-start`, `float-right` → `float-end`
-
-   Exclude vendored/generated code. Manual review pass on ~10 heavy files and on semantically-LTR content (code blocks, video scrubber → explicit `dir="ltr"`).
-7. **Locale-aware formatters** — new `apps/web/lib/format.ts` with `formatMoney(amount, currency, locale?)` and `formatDate(d, locale?)`. Replace hardcoded `'en-US'` sites:
-   - `apps/web/components/Objects/Account/subpages/AccountPurchases.tsx:30,37`
-   - `apps/web/components/Objects/Courses/CourseActions/CourseActionsMobile.tsx`
-   - `apps/web/components/Objects/Courses/CourseActions/OfferCard.tsx`
-   - `apps/web/components/Payments/PaymentWall.tsx`
-
-   Defaults: `locale = getClientLocale() ?? 'he-IL'`, `currency = 'ILS'`.
-
-**Removed from this phase** (vs. previous plan): ILS offer-currency default and Stripe `locale: 'he'` — we no longer use LH's Stripe integration. The learner lands in LH already enrolled; PaymentWall becomes a dead code path for our instance (still renders correctly for upstream but never triggered by our flow).
-
-## Phase 2 — LH learner-surface Hebrew polish
-
-Goal: every learner-facing screen reads natively in Hebrew. Admin screens stay English.
-
-1. **Translate `he.json`** in learner-priority order:
-   1. Auth (sign in / password reset — magic-link landing needs to look right)
-   2. Course player: lesson view, video, activity (`apps/web/app/orgs/[orgslug]/(withmenu)/course/...`)
-   3. Account: purchases, profile, settings
-   4. Course catalog & detail (lower priority — sister's buyers won't browse LH; they buy on Webflow)
-   5. **Skip**: admin dashboard (`apps/web/app/orgs/[orgslug]/dash/**`) — English only
-2. **Replace hardcoded strings** on learner surfaces:
-   - `apps/web/components/Objects/Account/subpages/AccountPurchases.tsx:48,54,68`
-   - Auth components (explore & enumerate before touching)
-3. **Icon/direction audit** — directional Phosphor/Lucide icons (arrows, chevrons, back-buttons, step indicators) on learner surfaces. Either wrap in a `<DirAware>` helper that flips under `dir=rtl`, or pair each with its mirror.
-4. **Typography polish for Hebrew** — `.lang-he` rule in `apps/web/app/globals.css`: tighter line-height, slightly larger base size, `letter-spacing: normal`.
-5. **Date strings** — `dayjs.locale('he')` where relative time shows (`DiscussionDetail.tsx`, `CommentCard.tsx`).
+If we ever want Hebrew UI back, the codemod (`apps/web/scripts/codemod-rtl.mjs`) is recoverable from the old branch's history; but there's no reason to run it given the architecture.
 
 ## Phase 3 — Webflow storefront
 
@@ -269,16 +242,9 @@ Small, targeted LH changes beyond Phases 1–2.
 
 | Purpose | Path |
 |---|---|
-| HTML lang/dir | `apps/web/app/layout.tsx` |
-| Default font | `apps/web/app/layout.tsx` + `apps/web/lib/fonts.ts` |
-| Global CSS for RTL polish | `apps/web/app/globals.css` |
-| Tailwind version | `apps/web/package.json` |
-| Hebrew locale bundle | `apps/web/locales/he.json` (new) |
-| Server locale helper | `apps/web/services/i18n/serverLocale.ts` (new) |
-| Formatters | `apps/web/lib/format.ts` (new) |
-| Codemod | `apps/web/scripts/codemod-rtl.mjs` (new, one-shot) |
-| Hardcoded `en-US` formatters | `apps/web/components/Objects/Account/subpages/AccountPurchases.tsx:30,37`; `.../CourseActionsMobile.tsx`; `.../OfferCard.tsx`; `apps/web/components/Payments/PaymentWall.tsx` |
-| Hardcoded learner-side strings | `apps/web/components/Objects/Account/subpages/AccountPurchases.tsx:48,54,68` (+ auth components TBD) |
+| Deploy compose | `docker-compose.yml` |
+| Single-container image | `Dockerfile` + `docker/start.sh` + `docker/nginx.conf` |
+| Env template | `.env.example` |
 | Bridge service | `services/bridge/` — Hono + Bun + TS + zod; Grow handler, LH client, Mailchimp client, Webflow client, Resend client |
 | Bridge entry | `services/bridge/src/index.ts` |
 | Grow webhook handler | `services/bridge/src/webhooks/grow.ts` |
@@ -299,10 +265,9 @@ Not modified here (external systems): Webflow project, Grow account, Mailchimp a
 
 ## Existing utilities to reuse
 
-- **i18next infra** (`apps/web/services/i18n/`) — already wired with 19 locale bundles and lazy loading.
-- **Font catalog** (`apps/web/lib/fonts.ts`) — Rubik and Noto Sans already defined; **Heebo** set as the live default (verified on the running instance).
-- **LH admin API** — `GET/POST/DELETE /api/v1/admin/{org_slug}/...` is the real surface the bridge uses (per the Phase 5 correction). Stripe payment-flow code in `apps/api/ee/services/payments/...` is a dead code path for our instance and not used.
+- **LH admin API** — `GET/POST/DELETE /api/v1/admin/{org_slug}/...` is the real surface the bridge uses. Stripe payment-flow code in `apps/api/ee/services/payments/...` is a dead code path for our instance and not used.
 - **Docker compose** (`docker-compose.yml`) — add the bridge as a sibling service alongside `lms`, `postgres`, `redis`.
+- **Upstream LH defaults stay in place** — `apps/web/app/layout.tsx` has static `lang="en"`, default font is upstream's Wix Madefor Text, locale bundles are the upstream 20 languages (English + 19 others) with no Hebrew. None of that needs changing for our architecture.
 
 ## Verification
 
@@ -312,12 +277,10 @@ cd apps/web && bun install && bun run lint
 cd apps/api && uv sync && uv run ruff check && uv run pytest
 ```
 
-**RTL smoke test:**
-1. `npx learnhouse dev` → Postgres, Redis, API, Web, Collab up.
-2. Open the app; confirm `<html lang="he" dir="rtl">` in devtools.
-3. Switch to English via the language switcher → confirm `<html lang="en" dir="ltr">` and layout mirrors cleanly.
-4. Walk through the course player, account purchases, auth pages in both directions. No clipped text, misaligned icons, overlapping chevrons.
-5. Cross-browser: Chrome, Firefox, Safari (desktop), iOS Safari.
+**LH English-UI smoke test:**
+1. Deploy LH; visit `https://lms.lanternroute.com/orgs/default/dash` and the learner app.
+2. Confirm `<html lang="en" dir="ltr">` in devtools across admin + learner surfaces.
+3. Create a course with a Hebrew lesson title + Hebrew lesson body. Confirm the Hebrew text renders correctly (bidi) inside the English UI shell — RTL paragraph direction applied to the Hebrew text itself only, UI chrome stays LTR.
 
 **Bridge integration smoke test:**
 1. `cd services/bridge && bun run dev`.
