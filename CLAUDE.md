@@ -1,12 +1,12 @@
 # CLAUDE.md — orientation for Claude Code sessions in this repo
 
-This is a **fork of LearnHouse** (`learnhouse/learnhouse`) deployed as a single-tenant, Hebrew-first LMS for one creator. The upstream README describes the project's full feature set; most of those features are intentionally turned **off** here. Read the docs below before doing discovery.
+This is a **fork of LearnHouse** (`learnhouse/learnhouse`) deployed as a single-tenant, **English-UI** headless learner app for one creator. Hebrew lives in Webflow (marketing + blog) and in course *content* the creator authors — not in LH's chrome. The upstream README describes the project's full feature set; most of those features are intentionally turned **off** here. Read the docs below before doing discovery.
 
 ## What you should read before doing anything
 
 In order of "no, really, read this":
 
-1. `docs/PLAN.md` — the full multi-phase plan (RTL → Hebrew → deploy → Wix/Grow → bridge). Authoritative scope.
+1. `docs/PLAN.md` — the v2 plan (fresh fork; Webflow storefront → Grow checkout → bridge → LH). Authoritative scope.
 2. `docs/HANDOFF.md` — current state of deploy + admin credentials + open blockers. Read this before changing infra.
 3. `docs/LH-SETUP-PLAYBOOK.md` — the LH admin / API setup playbook, with the visibility model and the bridge endpoint map. Read this before touching org config or designing the bridge.
 
@@ -16,7 +16,7 @@ If a question is answered in those, use them — don't re-derive.
 
 ```
 apps/api    FastAPI + SQLModel + Postgres+pgvector + Redis. Routers in src/routers/.
-apps/web    Next.js (App Router) + Tailwind 4. Hebrew + RTL by default.
+apps/web    Next.js (App Router) + Tailwind 4. English UI (upstream default); Hebrew renders only inside lesson content via Unicode bidi.
 apps/collab Hocuspocus / Yjs (only used by Boards, which is feature-flagged off).
 apps/cli    LH's npm CLI; not used in our deploy path.
 docker/     start.sh + nginx.conf for the single-container PM2 image.
@@ -28,13 +28,13 @@ The live instance is at `https://lms.lanternroute.com` (admin email `admin@lante
 ## Hard constraints (don't violate without checking)
 
 - **Single-tenant, OSS mode.** `NEXT_PUBLIC_LEARNHOUSE_MULTI_ORG=false`, `LEARNHOUSE_DISABLE_EE=1`. Do not re-enable EE features (SSO, multi-org, advanced analytics, audit logs, SCORM).
-- **Admin UI is English; learner UI is Hebrew.** Translation work happens in `apps/web/locales/he.json` (learner namespaces only — see HANDOFF.md for the list). Don't add HE keys to admin namespaces.
-- **No LH paywall.** Commerce lives in Wix + Grow; entitlement is granted by the bridge calling `/api/v1/admin/{org_slug}/enrollments/...`. The `payments` feature flag stays disabled. `signup_mechanism=inviteOnly` — only the bridge creates users.
+- **LH UI is English across the board** (admin + learner). Don't add Hebrew translation keys or touch `<html lang>`/`dir` — Hebrew lesson content renders correctly inside the English shell via Unicode bidi. The codemod that would Hebrew-ize the chrome was scrapped; don't resurrect it without a plan change.
+- **No LH paywall.** Commerce lives in Webflow + Grow; entitlement is granted by the bridge calling `/api/v1/admin/{org_slug}/enrollments/...`. The `payments` feature flag stays disabled. `signup_mechanism=inviteOnly` — only the bridge creates users.
 - **No content drift between the playbook and the live instance.** When you toggle a feature flag or change org config via API, update `docs/LH-SETUP-PLAYBOOK.md` if the change is permanent.
 
 ## Branching + commits
 
-- Working branch: `claude/rtl-stripe-integration-uGQRo` (shared with the human operator's earlier sessions). Don't create new branches unless asked.
+- Working branch: `feat/launch-v2` (fresh fork from upstream; cherry-picks the surviving work from the earlier `feat/storefront-bridge-launch` branch). Don't create new branches unless asked.
 - Conventional commits: `feat(scope):`, `fix(scope):`, `docs:`, `chore:`. See `git log --oneline -10` for examples.
 - Commit when work reaches a meaningful checkpoint; don't batch unrelated changes.
 
