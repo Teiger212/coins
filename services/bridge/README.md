@@ -1,8 +1,25 @@
 # services/bridge
 
-Tiny Hono + Bun + TypeScript service that turns a Grow by Meshulam "paid" webhook into a LearnHouse enrollment + magic-link URL.
+Hono + Bun + TypeScript service that connects Grow by Meshulam (Israeli payments), LearnHouse (LMS), Webflow (marketing storefront), Mailchimp, and Resend.
 
-This is **scaffolding only** — the LH client, env validation, webhook handler, and HMAC verification are wired up; idempotency, email delivery, and the real Grow payload schema are deliberately deferred (see TODOs in source + the "Blocked on" list below).
+## Routes
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET`  | `/health` | Liveness probe (used by UptimeRobot). |
+| `POST` | `/webhooks/grow` | Grow payment / refund / chargeback events → LH enrollment, Mailchimp, Resend. |
+| `POST` | `/webhooks/lh-course` | LH `course_*` events → Webflow CMS upsert (kept drift-free by construction). |
+| `POST` | `/public/magic-link/request` | Public, unauthenticated: learner requests a fresh magic link after expiry. |
+
+## Scripts
+
+All invoked via `bun run <name>`:
+
+- `reap-expired` — nightly cron. Unenrolls learners whose 12-month window has elapsed. `--dry-run` to preview.
+- `replay --file=fixtures/sample.json` — re-dispatch a saved payload. Useful for local smoke tests.
+- `replay --transaction-id=TX` — **stub**: fetch-from-Grow requires their API docs (auth-walled).
+- `check-course-ids` — lists LH course UUIDs; manual cross-check vs. Grow product custom fields.
+- `check-prices` — lists Webflow CMS prices; manual cross-check vs. Grow product prices.
 
 ## Run locally
 
@@ -31,40 +48,81 @@ curl -i -X POST http://localhost:3001/webhooks/grow \
 
 `bun run typecheck` should report zero errors.
 
-## What's done
+## Architecture
 
-- Typed LH admin client: `getUserByEmail`, `provisionUser`, `enrollUser`, `issueMagicLink`. Mirrors `apps/api/src/routers/admin.py:154-178`.
-- Hono webhook handler: HMAC verify → zod-parse → LH calls → response with the magic-link URL.
-- Env validation via zod (`src/env.ts`). Boot fails loudly if required vars are missing.
-- 7-day magic-link TTL by default (LH cap, post-`5df42a1e`).
+```
+                                       Grow payment
+                                            │
+                                            ▼
+                                [POST /webhooks/grow]
+                                            │
+                        ┌───────────────────┼───────────────────┐
+                        ▼                   ▼                   ▼
+              LH admin: upsert     Mailchimp: tag          Resend: He
+              user + enroll        as "buyer"              magic-link email
+              (+ 12-mo expiry                              (reissuable at
+               in SQLite)                                  /auth/magic/request)
+
+LH course edit ──▶ [POST /webhooks/lh-course] ──▶ Webflow CMS upsert
+                   (keyed on course_uuid; slug preserved on update)
+
+Learner clicks expired link ──▶ LH page at /auth/magic/request
+                                     │
+                                     └──▶ [POST /public/magic-link/request]
+                                          (rate-limited; only issues if
+                                           SQLite shows active enrollment)
+
+Daily cron ──▶ scripts/reap-expired.ts  (unenroll past expires_at)
+```
+
+## Persistence
+
+SQLite at `SQLITE_PATH` (default `/var/lib/bridge/bridge.db`). Two tables:
+
+- `processed_events` — idempotency on `(transaction_id, event_type)`. Re-posts short-circuit.
+- `enrollments` — records `user_id → course_uuid` with 12-month `expires_at`. Reaper reads this.
+- `magic_reissue_attempts` — rolling window for public reissue rate limiting.
+
+Mount a Docker volume to `/var/lib/bridge` so the DB survives restarts.
 
 ## Blocked on
 
-| Item | Owner | Why deferred |
-|------|-------|-------------|
-| `RESEND_API_KEY`, `RESEND_FROM`, He email template | Operator | Needs a verified sending domain first (DNS + SPF/DKIM). Until then the bridge logs the magic-link URL to stdout instead of sending email. |
-| `GROW_WEBHOOK_SECRET` + signature header format | Operator + Grow docs | Need a real test webhook to confirm header name and HMAC encoding (current code handles `sha256=hex` and bare hex). |
-| Real Grow payload schema in `src/types/grow.ts` | Operator | Provisional zod schema — tighten once a real test transaction lands. |
-| Idempotency store (Redis or SQLite) | Decide pre-deploy | PLAN.md "Open items" leaves the choice open. For now, replays re-trigger LH calls; LH endpoints are mostly idempotent (provision returns 400 on duplicate; enroll returns 400 on already-enrolled, treated as success). |
-| Deploy target (LH compose sibling vs. Fly.io) | Decide pre-deploy | Both fine; sibling is simpler. |
-| `LH_ADMIN_TOKEN` minted at `POST /api/v1/orgs/{org_id}/api-tokens` | Operator | Mint when ready to wire end-to-end; rights set documented in `docs/LH-SETUP-PLAYBOOK.md` Phase 5. |
+| Item | Owner | Why |
+|------|-------|-----|
+| `RESEND_API_KEY`, `RESEND_FROM`, verified sending domain | Operator | DKIM/SPF/DMARC required. Until then we log the link URL. |
+| `GROW_WEBHOOK_SECRET` + real payload fixtures | Operator + Grow docs | Grow docs auth-walled at grow-il.readme.io. Schema tightens after first live webhook. |
+| `MAILCHIMP_API_KEY`, `MAILCHIMP_LIST_ID` | Operator | Optional — bridge no-ops tagging if unset. |
+| `WEBFLOW_API_TOKEN`, `WEBFLOW_SITE_ID`, `WEBFLOW_COURSES_COLLECTION_ID` | Operator | Needed for `/webhooks/lh-course` and `check-prices`. |
+| `LH_ADMIN_TOKEN` minted at `POST /api/v1/orgs/{org_id}/api-tokens` | Operator | Rights: `users.{create,read,update}`, `enrollments.{create,delete}`, `courses.read`. |
+| Actual Grow API integration for `replay --transaction-id=X` | Operator + Grow docs | Requires `GROW_API_TOKEN` + the fetch-by-ID endpoint shape. |
 
 ## Layout
 
 ```
 services/bridge/
-├── package.json          Bun + Hono + zod + TS
-├── tsconfig.json         strict, ES2022, Bun resolution
-├── .env.example          every var the bridge will need
-├── README.md             this file
+├── package.json           Bun + Hono + zod + TS
+├── tsconfig.json
+├── .env.example           every var the bridge will need
+├── README.md              this file
+├── scripts/
+│   ├── reap-expired.ts    daily cron: unenroll past expires_at
+│   ├── replay.ts          re-post a saved payload (--file) / fetch from Grow (TBD)
+│   ├── check-course-ids.ts  drift audit vs. Grow products
+│   └── check-prices.ts      drift audit vs. Webflow CMS
 └── src/
-    ├── index.ts          Hono app, /health, /webhooks/* mount
-    ├── env.ts            zod env schema + loader
+    ├── index.ts           Hono app + route mounts
+    ├── env.ts             zod env schema + loader
+    ├── db.ts              SQLite bootstrap + processed_events + enrollments
     ├── clients/
-    │   └── learnhouse.ts typed LH admin client
+    │   ├── learnhouse.ts  typed LH admin client
+    │   ├── mailchimp.ts   list upsert + tag
+    │   ├── resend.ts      transactional email + He templates
+    │   └── webflow.ts     Webflow Data API v2 (collection items)
     ├── types/
-    │   ├── learnhouse.ts mirrors of LH Pydantic models
-    │   └── grow.ts       provisional Grow webhook schema
+    │   ├── learnhouse.ts  mirrors of LH Pydantic models
+    │   └── grow.ts        provisional Grow webhook schema
     └── webhooks/
-        └── grow.ts       /webhooks/grow handler
+        ├── grow.ts              payment/refund/chargeback handler
+        ├── lh-course.ts         LH → Webflow CMS sync handler
+        └── magic-reissue.ts     public magic-link reissue endpoint
 ```

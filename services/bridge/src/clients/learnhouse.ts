@@ -85,6 +85,21 @@ export class LearnhouseClient {
     throw new LearnhouseError(`enrollUser failed`, status, data);
   }
 
+  /**
+   * DELETE /api/v1/admin/{org_slug}/enrollments/{user_id}/{course_uuid}.
+   * 404 ("not enrolled") is treated as a no-op (already unenrolled).
+   */
+  async unenrollUser(args: {
+    userId: number;
+    courseUuid: string;
+  }): Promise<{ notEnrolled: boolean }> {
+    const path = `/admin/${this.cfg.orgSlug}/enrollments/${args.userId}/${args.courseUuid}`;
+    const { status, data } = await this.request<{ detail?: string }>("DELETE", path);
+    if (status === 200) return { notEnrolled: false };
+    if (status === 404) return { notEnrolled: true };
+    throw new LearnhouseError(`unenrollUser failed`, status, data);
+  }
+
   /** POST /api/v1/admin/{org_slug}/auth/magic-link → MagicLinkResponse. */
   async issueMagicLink(args: MagicLinkRequest): Promise<MagicLinkResponse> {
     const path = `/admin/${this.cfg.orgSlug}/auth/magic-link`;

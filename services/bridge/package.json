@@ -7,7 +7,11 @@
     "dev": "bun run --hot src/index.ts",
     "start": "bun run src/index.ts",
     "typecheck": "tsc --noEmit",
-    "build": "bun build src/index.ts --target=bun --outdir=dist"
+    "build": "bun build src/index.ts --target=bun --outdir=dist",
+    "reap-expired": "bun run scripts/reap-expired.ts",
+    "replay": "bun run scripts/replay.ts",
+    "check-course-ids": "bun run scripts/check-course-ids.ts",
+    "check-prices": "bun run scripts/check-prices.ts"
   },
   "dependencies": {
     "hono": "^4.6.14",

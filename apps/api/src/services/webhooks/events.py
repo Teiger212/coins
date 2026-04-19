@@ -145,6 +145,21 @@ WEBHOOK_EVENTS: dict[str, dict] = {
         "data_schema": {
             "course_uuid": "string",
             "name": "string",
+            "description": "string",
+            "about": "string",
+            "published": "boolean",
+            "org_id": "integer",
+        },
+    },
+    "course_updated": {
+        "category": "Course Lifecycle",
+        "description": "Triggered on every course metadata edit — intended for downstream mirrors (e.g. marketing-site CMS)",
+        "data_schema": {
+            "course_uuid": "string",
+            "name": "string",
+            "description": "string",
+            "about": "string",
+            "published": "boolean",
             "org_id": "integer",
         },
     },

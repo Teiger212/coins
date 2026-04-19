@@ -701,6 +701,9 @@ async def create_course(
         data={
             "course_uuid": course.course_uuid,
             "name": course.name,
+            "description": course.description or "",
+            "about": course.about or "",
+            "published": bool(course.published),
             "org_id": course.org_id,
         },
     )
@@ -881,6 +884,20 @@ async def update_course(
                 "published": course.published,
             },
         )
+
+    # Always fire course_updated so downstream mirrors (Webflow CMS, etc.) stay in sync.
+    await dispatch_webhooks(
+        event_name="course_updated",
+        org_id=course.org_id,
+        data={
+            "course_uuid": course.course_uuid,
+            "name": course.name,
+            "description": course.description or "",
+            "about": course.about or "",
+            "published": bool(course.published),
+            "org_id": course.org_id,
+        },
+    )
 
     # Get course authors with their roles
     authors_statement = (

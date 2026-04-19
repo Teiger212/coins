@@ -6,17 +6,33 @@
 
 import { z } from "zod";
 
+export const GROW_EVENT_TYPES = [
+  "payment_success",
+  "refund",
+  "chargeback",
+] as const;
+
+export type GrowEventType = (typeof GROW_EVENT_TYPES)[number];
+
 // Provisional schema. Tighten once we have a real payload.
 export const GrowWebhookSchema = z
   .object({
+    // Default to "payment_success" so legacy single-event payloads keep working.
+    event_type: z.enum(GROW_EVENT_TYPES).default("payment_success"),
     transaction_id: z.string().min(1),
     email: z.string().email(),
     full_name: z.string().optional(),
+    amount: z.coerce.number().optional(),
+    currency: z.string().optional(),
+    // Grow carries the course UUID as a hidden custom field on the product.
+    // `course_uuid` is required for payment_success; for refund/chargeback
+    // we fall back to looking it up by transaction_id via our SQLite store.
     custom_fields: z
       .object({
-        course_uuid: z.string().min(1),
+        course_uuid: z.string().min(1).optional(),
       })
-      .passthrough(),
+      .passthrough()
+      .optional(),
   })
   .passthrough();
 
